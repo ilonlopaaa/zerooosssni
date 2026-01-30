@@ -1,0 +1,160 @@
+name: RDP via ZeroTier
+
+on:
+  workflow_dispatch:
+
+jobs:
+  setup-rdp:
+    runs-on: windows-latest
+    timeout-minutes: 355  # 5 jam 55 menit
+
+    steps:
+    # ======================
+    # 1. INSTALL ZEROTIER
+    # ======================
+    - name: Install ZeroTier
+      run: |
+        echo "📦 Installing ZeroTier..."
+        $url = "https://download.zerotier.com/dist/ZeroTier%20One.msi"
+        $output = "$env:TEMP\zerotier.msi"
+        
+        # Download
+        Invoke-WebRequest -Uri $url -OutFile $output
+        
+        # Install silently
+        Start-Process msiexec.exe -Wait -ArgumentList "/i", "`"$output`"", "/quiet", "/norestart"
+        
+        # Wait for service
+        Start-Sleep -Seconds 20
+        echo "✅ ZeroTier installed"
+        
+    # ======================
+    # 2. JOIN NETWORK (GANTI NETWORK_ID!)
+    # ======================
+    - name: Join ZeroTier Network
+      run: |
+        echo "🔗 Joining ZeroTier network..."
+        
+        # ======== GANTI INI! ========
+        $NETWORK_ID = "a1b2c3d4e5"  # GANTI DENGAN NETWORK ID KAMU!
+        # ============================
+        
+        # Join network
+        & "C:\Program Files (x86)\ZeroTier\One\zerotier-one_x64.exe" join $NETWORK_ID
+        
+        # Wait for connection (max 30 seconds)
+        $maxWait = 30
+        for ($i = 1; $i -le $maxWait; $i++) {
+            $status = & "C:\Program Files (x86)\ZeroTier\One\zerotier-one_x64.exe" info
+            if ($status -match "ONLINE") {
+                echo "✅ ZeroTier connected!"
+                break
+            }
+            echo "⏳ Waiting... ($i/$maxWait)"
+            Start-Sleep -Seconds 1
+        }
+        
+        # Get ZeroTier IP
+        $ztInfo = & "C:\Program Files (x86)\ZeroTier\One\zerotier-one_x64.exe" listnetworks
+        if ($ztInfo -match '([0-9]{1,3}\.){3}[0-9]{1,3}') {
+            $ZEROTIER_IP = $matches[0]
+            echo "ZEROTIER_IP=$ZEROTIER_IP" >> $env:GITHUB_ENV
+            echo "🌐 ZeroTier IP: $ZEROTIER_IP"
+        } else {
+            echo "⚠️ Could not get IP. Check ZeroTier web admin to auth this device."
+            echo "ZEROTIER_IP=PENDING_AUTH" >> $env:GITHUB_ENV
+        }
+        
+    # ======================
+    # 3. SETUP RDP
+    # ======================
+    - name: Setup Remote Desktop
+      run: |
+        echo "🖥️ Setting up RDP..."
+        
+        # Enable RDP
+        reg add "HKLM\System\CurrentControlSet\Control\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 0 /f
+        
+        # Allow all connections (no NLA)
+        reg add "HKLM\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v UserAuthentication /t REG_DWORD /d 0 /f
+        
+        # Firewall rule
+        netsh advfirewall firewall add rule name="RDP-ZeroTier" dir=in action=allow protocol=TCP localport=3389
+        
+        # Restart service
+        Restart-Service TermService -Force
+        
+        echo "✅ RDP configured"
+        
+    # ======================
+    # 4. CREATE USER
+    # ======================
+    - name: Create RDP User
+      run: |
+        echo "👤 Creating user..."
+        
+        # User credentials (gampang diingat)
+        $USERNAME = "rdpuser"
+        $PASSWORD = "Pass123!"
+        
+        # Create user
+        net user $USERNAME $PASSWORD /add /Y
+        net localgroup administrators $USERNAME /add
+        net localgroup "Remote Desktop Users" $USERNAME /add
+        
+        # Save to env
+        echo "RDP_USER=$USERNAME" >> $env:GITHUB_ENV
+        echo "RDP_PASS=$PASSWORD" >> $env:GITHUB_ENV
+        
+        echo "✅ User created: $USERNAME / $PASSWORD"
+        
+    # ======================
+    # 5. DISPLAY INFO
+    # ======================
+    - name: Show Connection Details
+      run: |
+        echo ""
+        echo "========================================="
+        echo "🟢 RDP READY VIA ZEROTIER"
+        echo "========================================="
+        echo "ZEROTIER IP: $env:ZEROTIER_IP"
+        echo "RDP ADDRESS: $env:ZEROTIER_IP:3389"
+        echo "USERNAME: $env:RDP_USER"
+        echo "PASSWORD: $env:RDP_PASS"
+        echo "========================================="
+        echo "📌 IMPORTANT:"
+        echo "1. Buka my.zerotier.com"
+        echo "2. Pilih network '$NETWORK_ID'"
+        echo "3. Cari device baru (belum auth)"
+        echo "4. CENTANG checkbox 'Auth'"
+        echo "5. Tunggu 30 detik"
+        echo "6. Connect RDP ke IP di atas"
+        echo "========================================="
+        echo "⏳ Duration: ~6 hours"
+        echo "========================================="
+        
+    # ======================
+    # 6. KEEP WORKFLOW ALIVE
+    # ======================
+    - name: Keep Alive
+      run: |
+        # Timer 5 jam 50 menit
+        $startTime = Get-Date
+        $durationMinutes = 350
+        
+        while (((Get-Date) - $startTime).TotalMinutes -lt $durationMinutes) {
+            $elapsed = ((Get-Date) - $startTime).ToString("hh\:mm\:ss")
+            $remaining = $durationMinutes - ((Get-Date) - $startTime).TotalMinutes
+            $hours = [math]::Floor($remaining / 60)
+            $minutes = [math]::Floor($remaining % 60)
+            
+            echo "[$elapsed elapsed] 🕒 $hours jam $minutes menit tersisa"
+            
+            # Log status
+            echo "$(Get-Date) - Still running" >> $env:GITHUB_WORKSPACE\rdp_status.log
+            
+            # Sleep 1 minute
+            Start-Sleep -Seconds 60
+        }
+        
+        echo "⏰ Time's up! Workflow will end."
