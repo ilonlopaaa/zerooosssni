@@ -1,0 +1,77 @@
+name: RDP ZeroTier Simple
+
+on: workflow_dispatch
+
+jobs:
+  rdp:
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+    # 1. INSTALL ZEROTIER (PASTI JALAN)
+    - name: Install ZeroTier
+      run: |
+        # Download
+        curl.exe -L "https://download.zerotier.com/dist/ZeroTier%20One.msi" -o zt.msi
+        # Install
+        msiexec /i zt.msi /quiet /norestart
+        # Tunggu 10 detik doang
+        timeout /t 10 /nobreak
+        echo "✅ ZeroTier installed"
+        
+    # 2. JOIN NETWORK
+    - name: Join ZeroTier Network
+      run: |
+        # GANTI INI DENGAN NETWORK ID KAMU!
+        $NET_ID = "a1b2c3d4e5"
+        
+        # PAKE POWERSHELL BUAT JOIN, BUKAN EXE LANGSUNG
+        $ServiceName = "ZeroTierOneService"
+        
+        # Start service dulu
+        Start-Service -Name $ServiceName -ErrorAction SilentlyContinue
+        
+        # Join pake zerotier-cli (ada di system32 setelah install)
+        zerotier-cli join $NET_ID
+        
+        echo "✅ Joined network: $NET_ID"
+        echo "📌 Auth device di: my.zerotier.com"
+        
+    # 3. SETUP RDP
+    - name: Setup RDP
+      run: |
+        reg add "HKLM\System\CurrentControlSet\Control\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 0 /f
+        netsh advfirewall firewall add rule name="RDP" dir=in action=allow protocol=TCP localport=3389
+        echo "✅ RDP ready"
+        
+    # 4. CREATE USER
+    - name: Create User
+      run: |
+        net user rdpuser "Pass123!" /add /Y
+        net localgroup administrators rdpuser /add
+        echo "USER=rdpuser" >> $env:GITHUB_ENV
+        echo "PASS=Pass123!" >> $env:GITHUB_ENV
+        echo "✅ User created"
+        
+    # 5. DISPLAY INFO
+    - name: Show Info
+      run: |
+        echo ""
+        echo "========================================"
+        echo "🟢 RDP VIA ZEROTIER"
+        echo "========================================"
+        echo "NOTE: Check my.zerotier.com"
+        echo "1. Auth device baru"
+        echo "2. Tunggu 1 menit"
+        echo "3. Lihat IP ZeroTier di web"
+        echo "4. Connect ke IP itu:3389"
+        echo "========================================"
+        echo "User: $env:USER"
+        echo "Pass: $env:PASS"
+        echo "========================================"
+        
+        # Keep alive 55 menit
+        for ($i=1; $i -le 55; $i++) {
+            echo "[$(Get-Date)] Running... $((55-$i))m left"
+            Start-Sleep -Seconds 60
+        }
