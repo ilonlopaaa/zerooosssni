@@ -1,0 +1,86 @@
+name: RDP ZeroTier Fixed
+
+on: workflow_dispatch
+
+jobs:
+  rdp:
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+    # 1. INSTALL ZEROTIER - NO TIMEOUT ERROR
+    - name: Install ZeroTier
+      run: |
+        # Download
+        curl.exe -L "https://download.zerotier.com/dist/ZeroTier%20One.msi" -o zt.msi
+        echo "Downloaded"
+        
+        # Install
+        msiexec /i zt.msi /quiet /norestart
+        echo "Installing..."
+        
+        # Tunggu pakai Start-Sleep (PowerShell)
+        Start-Sleep -Seconds 15
+        echo "✅ ZeroTier installed"
+        
+    # 2. JOIN NETWORK - SIMPLE
+    - name: Join ZeroTier Network
+      run: |
+        # GANTI NETWORK ID KAMU!
+        $NET_ID = "3b19b3a7165858a8"
+        
+        # Start service
+        Start-Service ZeroTierOneService -ErrorAction SilentlyContinue
+        
+        # Tunggu service ready
+        Start-Sleep -Seconds 5
+        
+        # Join network
+        zerotier-cli join $NET_ID
+        
+        echo "Joined network: $NET_ID"
+        echo "⚠️ Auth device di: my.zerotier.com"
+        echo "Setelah auth, tunggu 1 menit baru connect RDP"
+        
+    # 3. SETUP RDP
+    - name: Setup RDP
+      run: |
+        reg add "HKLM\System\CurrentControlSet\Control\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 0 /f
+        netsh advfirewall firewall add rule name="RDP" dir=in action=allow protocol=TCP localport=3389
+        echo "✅ RDP ready"
+        
+    # 4. CREATE USER
+    - name: Create User
+      run: |
+        net user rdpzt "Pass123!" /add /Y
+        net localgroup administrators rdpzt /add
+        echo "USER=rdpzt" >> $env:GITHUB_ENV
+        echo "PASS=Pass123!" >> $env:GITHUB_ENV
+        echo "✅ User created"
+        
+    # 5. DISPLAY INFO
+    - name: Show Info
+      run: |
+        echo ""
+        echo "========================================"
+        echo "🟢 RDP ZEROTIER - AUTH REQUIRED"
+        echo "========================================"
+        echo "1. BUKA: https://my.zerotier.com"
+        echo "2. PILIH NETWORK: $NET_ID"
+        echo "3. CARI DEVICE BARU"
+        echo "4. CENTANG 'Auth'"
+        echo "5. TUNGGU 1 MENIT"
+        echo "6. LIHAT IP di WEB"
+        echo "7. CONNECT RDP ke IP:3389"
+        echo "========================================"
+        echo "User: rdpzt"
+        echo "Pass: Pass123!"
+        echo "========================================"
+        
+        # Keep alive - no timeout command
+        $counter = 0
+        while ($counter -lt 55) {
+            Start-Sleep -Seconds 60
+            $counter++
+            Write-Host "[$(Get-Date)] Still running... $(55-$counter) minutes left"
+        }
